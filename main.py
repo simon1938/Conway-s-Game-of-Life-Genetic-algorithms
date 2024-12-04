@@ -1,205 +1,259 @@
 import pygame
 import numpy as np
 import pygad
-import time
+import json
+import argparse
+from dataclasses import dataclass
 
-WIDTH, HEIGHT = 800, 600
-CELL_SIZE = 10
-GRID_WIDTH = WIDTH // CELL_SIZE
-GRID_HEIGHT = HEIGHT // CELL_SIZE
+@dataclass
+class GameConfig:
+    width: int = 800
+    height: int = 600
+    cell_size: int = 10
+    initial_cells: int = 50
+    evolution_steps: int = 20
+    training_attempts: int = 20
 
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-
-class GameOfLifeAI:
-    def __init__(self, focus='balanced'):
-        """
-        Initialize the Game of Life AI
-        
-        Args:
-            focus (str): Focus of fitness function
-            Options: 
-            - 'stability': Focus on stable patterns
-            - 'oscillation': Focus on oscillating patterns
-            - 'movement': Focus on moving patterns
-            - 'balanced': Consider all aspects
-        """
-        pygame.init()
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption(f"Game of Life AI - {focus.capitalize()} Focus")
-        self.clock = pygame.time.Clock()
-        
-        self.focus = focus
-        self.reset_grid()
-        
+class GameOfLife:
+    def __init__(self, config: GameConfig):
+        self.config = config
+        self.grid_width = config.width // config.cell_size
+        self.grid_height = config.height // config.cell_size
+        self.grid = np.zeros((self.grid_height, self.grid_width), dtype=int)
         self.rules = [2, 3, 3]
-        self.generation = 0
 
-    def reset_grid(self):
-        """Réinitialise la grille de manière aléatoire"""
-        self.grid = np.random.choice([0, 1], 
-                                     size=(GRID_HEIGHT, GRID_WIDTH), 
-                                     p=[0.85, 0.15])  # Moins de cellules vivantes
-
-    def update_grid(self, grid, rules):
-        """Mettre à jour la grille selon les règles"""
-        min_survive, max_survive, birth = rules
-        new_grid = np.zeros_like(grid)
-        padded_grid = np.pad(grid, pad_width=1, mode='constant', constant_values=0)
+    def update_grid(self):
+        new_grid = np.zeros_like(self.grid)
+        padded_grid = np.pad(self.grid, pad_width=1, mode="constant")
         
         for row in range(1, padded_grid.shape[0] - 1):
             for col in range(1, padded_grid.shape[1] - 1):
                 neighbors = np.sum(padded_grid[row-1:row+2, col-1:col+2]) - padded_grid[row, col]
-                
-                if padded_grid[row, col] == 1 and (neighbors < min_survive or neighbors > max_survive):
+                if padded_grid[row, col] == 1 and (neighbors < self.rules[0] or neighbors > self.rules[1]):
                     new_grid[row-1, col-1] = 0
-                elif padded_grid[row, col] == 0 and neighbors == birth:
+                elif padded_grid[row, col] == 0 and neighbors == self.rules[2]:
                     new_grid[row-1, col-1] = 1
                 else:
                     new_grid[row-1, col-1] = padded_grid[row, col]
         return new_grid
 
-    def draw_grid(self, grid):
-        """Dessiner la grille"""
-        self.screen.fill(BLACK)
-        for row in range(GRID_HEIGHT):
-            for col in range(GRID_WIDTH):
-                color = WHITE if grid[row, col] == 1 else BLACK
-                pygame.draw.rect(self.screen, color, 
-                                 (col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE))
-        pygame.display.flip()
+    def calculate_pattern_fitness(self, grid_history):
+        unique_patterns = len(set(map(lambda g: g.tobytes(), grid_history)))
+        live_cell_scores = [np.sum(grid) for grid in grid_history]
+        stability_scores = [np.sum(np.abs(grid_history[i] - grid_history[i-1])) 
+                          for i in range(1, len(grid_history))]
+        
+        return (unique_patterns * 
+                np.mean(live_cell_scores) * 
+                (1 / (np.mean(stability_scores) + 1)) * 
+                np.std(live_cell_scores))
 
-    def calculate_fitness(self, grid, rules, max_generations=20):
-        """
-        Calculer la fitness basée sur le focus
+    def calculate_fitness(self, positions):
+        self.grid = np.zeros((self.grid_height, self.grid_width), dtype=int)
+        for x, y in positions:
+            if 0 <= x < self.grid_width and 0 <= y < self.grid_height:
+                self.grid[y, x] = 1
+
+        grid_history = [self.grid.copy()]
+        temp_grid = self.grid.copy()
         
-        Args:
-            grid (np.array): Grille initiale
-            rules (list): Règles du jeu
-            max_generations (int): Nombre de générations à simuler
-        
-        Returns:
-            float: Score de fitness
-        """
-        temp_grid = grid.copy()
-        grid_history = [temp_grid.copy()]
-        
-        for _ in range(max_generations):
-            temp_grid = self.update_grid(temp_grid, rules)
+        for _ in range(self.config.evolution_steps):
+            temp_grid = self.update_grid()
             grid_history.append(temp_grid.copy())
-        
-        # Calculs de fitness selon le focus
-        if self.focus == 'stability':
-            # Score de stabilité : moins de changements
-            fitness = max_generations - sum(np.sum(np.abs(grid_history[i] - grid_history[i-1])) for i in range(1, len(grid_history)))
-        
-        elif self.focus == 'oscillation':
-            # Score d'oscillation : recherche des motifs cycliques
-            fitness = self.detect_oscillation(grid_history)
-        
-        elif self.focus == 'movement':
-            # Score de mouvement : déplacement du centre de masse
-            fitness = self.calculate_movement(grid_history)
-        
-        else:  # balanced
-            stability = max_generations - sum(np.sum(np.abs(grid_history[i] - grid_history[i-1])) for i in range(1, len(grid_history)))
-            oscillation = self.detect_oscillation(grid_history)
-            movement = self.calculate_movement(grid_history)
-            fitness = (stability + oscillation + movement) / 3
-        
-        return max(0, fitness)
+            
+        return self.calculate_pattern_fitness(grid_history)
 
-    def detect_oscillation(self, grid_history, period_range=(2, 10)):
-        """
-        Détecter l'oscillation dans l'historique de la grille
-        
-        Returns:
-            float: Score d'oscillation
-        """
-        for period in range(period_range[0], period_range[1] + 1):
-            if period < len(grid_history):
-                if np.array_equal(grid_history[0], grid_history[period]):
-                    return len(grid_history) / period
-        return 0
+    def train(self):
+        def on_generation(ga):
+            best_solution = ga.best_solution()[0]
+            positions = [(int(best_solution[i]), int(best_solution[i+1])) 
+                        for i in range(0, len(best_solution), 2)]
+            fitness = self.calculate_fitness(positions)
+            print(f"Generation {ga.generations_completed}: Best Fitness = {fitness:.2f}")
 
-    def calculate_movement(self, grid_history):
-        """
-        Calculer le mouvement du centre de masse
-        
-        Returns:
-            float: Score de mouvement
-        """
-        def center_of_mass(grid):
-            rows, cols = np.where(grid == 1)
-            if len(rows) == 0:
-                return None
-            return np.mean(rows), np.mean(cols)
-        
-        centers = [center_of_mass(grid) for grid in grid_history if center_of_mass(grid) is not None]
-        
-        if len(centers) > 1:
-            # Distance totale parcourue
-            total_distance = sum(np.linalg.norm(np.array(centers[i]) - np.array(centers[i-1])) for i in range(1, len(centers)))
-            return total_distance
-        return 0
-
-    def optimize_rules(self):
-        """Optimiser les règles avec un algorithme génétique"""
         def fitness_func(ga_instance, solution, solution_idx):
-            return self.calculate_fitness(self.grid, solution)
+            positions = [(int(solution[i]), int(solution[i+1])) 
+                        for i in range(0, len(solution), 2)]
+            fitness = self.calculate_fitness(positions)
+            print(f"Testing solution {solution_idx} - Fitness: {fitness:.2f}")
+            return fitness
 
+        print("Starting training...")
+        print(f"Initial cells: {self.config.initial_cells}")
+        print(f"Evolution steps: {self.config.evolution_steps}")
+
+        num_genes = self.config.initial_cells * 2
         ga_instance = pygad.GA(
-            num_generations=10,
-            num_parents_mating=3,
+            num_generations=20,
+            num_parents_mating=5,
             fitness_func=fitness_func,
-            sol_per_pop=8,
-            num_genes=3,
-            gene_space=[(1, 3), (3, 5), (2, 4)],
-            mutation_num_genes=1,
-            on_generation=lambda ga: print(f"Genetic Algorithm Gen {ga.generations_completed}")
+            sol_per_pop=10,
+            num_genes=num_genes,
+            gene_space=[ 
+                {"low": 0, "high": self.grid_width - 1} if i % 2 == 0 
+                else {"low": 0, "high": self.grid_height - 1} 
+                for i in range(num_genes)
+            ],
+            mutation_num_genes=2,
+            mutation_type="random",
+            on_generation=on_generation
         )
 
         ga_instance.run()
         solution, fitness, _ = ga_instance.best_solution()
-        return [int(solution[0]), int(solution[1]), int(solution[2])]
+        
+        best_positions = [(int(solution[i]), int(solution[i+1])) 
+                         for i in range(0, len(solution), 2)]
+        
+        print(f"\nTraining completed!")
+        print(f"Best fitness found: {fitness:.2f}")
+        print(f"Saving {len(best_positions)} positions to best_positions.json")
+        
+        with open('best_positions.json', 'w') as f:
+            json.dump(best_positions, f)
 
-    def run(self):
-        """Boucle principale du jeu"""
+    def visualize(self):
+        pygame.init()
+        screen = pygame.display.set_mode((self.config.width, self.config.height))
+        clock = pygame.time.Clock()
+        
+        try:
+            with open('best_positions.json', 'r') as f:
+                positions = json.load(f)
+                print(f"Loaded {len(positions)} positions from best_positions.json")
+        except FileNotFoundError:
+            print("Error: best_positions.json not found. Run training first.")
+            return
+
+        self.grid = np.zeros((self.grid_height, self.grid_width), dtype=int)
+        for x, y in positions:
+            self.grid[y, x] = 1
+
         running = True
+        generation = 0
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                if event.type == pygame.KEYDOWN:
-                    # Changer le focus avec des touches
-                    if event.key == pygame.K_s:
-                        self.focus = 'stability'
-                        print("🎯 Focus: Stabilité")
-                    elif event.key == pygame.K_o:
-                        self.focus = 'oscillation'
-                        print("🎯 Focus: Oscillation")
-                    elif event.key == pygame.K_m:
-                        self.focus = 'movement'
-                        print("🎯 Focus: Mouvement")
-                    elif event.key == pygame.K_b:
-                        self.focus = 'balanced'
-                        print("🎯 Focus: Équilibré")
 
-            self.grid = self.update_grid(self.grid, self.rules)
-            self.draw_grid(self.grid)
+            screen.fill((0, 0, 0))
+            for row in range(self.grid_height):
+                for col in range(self.grid_width):
+                    if self.grid[row, col] == 1:
+                        pygame.draw.rect(screen, (255, 255, 255),
+                                     (col * self.config.cell_size, 
+                                      row * self.config.cell_size,
+                                      self.config.cell_size - 1,
+                                      self.config.cell_size - 1))
 
-            # Optimiser et reset à chaque 50 générations
-            if self.generation % 50 == 0 and self.generation > 0:
-                print(f"🔄 Optimizing rules at generation {self.generation}")
-                self.rules = self.optimize_rules()
-                self.reset_grid()  # Réinitialisation après optimisation
-                print(f"🆕 New rules: {self.rules}")
-
-            self.clock.tick(10)
-            self.generation += 1
+            pygame.display.flip()
+            self.grid = self.update_grid()
+            clock.tick(10)
+            generation += 1
+            pygame.display.set_caption(f"Generation: {generation}")
 
         pygame.quit()
 
+def visualize_initial_grid(config: GameConfig):
+    """Affiche uniquement la grille de départ, avec option pour continuer le jeu."""
+    pygame.init()
+    screen = pygame.display.set_mode((config.width, config.height))
+    clock = pygame.time.Clock()
+
+    try:
+        with open('best_positions.json', 'r') as f:
+            positions = json.load(f)
+            print(f"Loaded {len(positions)} positions from best_positions.json")
+    except FileNotFoundError:
+        print("Error: best_positions.json not found. Run training first.")
+        return
+
+    # Initialiser la grille
+    grid_width = config.width // config.cell_size
+    grid_height = config.height // config.cell_size
+    grid = np.zeros((grid_height, grid_width), dtype=int)
+
+    for x, y in positions:
+        grid[y, x] = 1
+
+    running = True
+    evolving = False
+    generation = 0
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_e:  # Appuyer sur E pour commencer l'évolution
+                    evolving = True
+                    print("🔄 Lancement de l'évolution classique !")
+
+        screen.fill((0, 0, 0))
+
+        # Dessiner la grille
+        for row in range(grid_height):
+            for col in range(grid_width):
+                if grid[row, col] == 1:
+                    pygame.draw.rect(screen, (255, 255, 255),
+                                     (col * config.cell_size,
+                                      row * config.cell_size,
+                                      config.cell_size - 1,
+                                      config.cell_size - 1))
+
+        pygame.display.flip()
+
+        # Si le mode évolution est activé, mettre à jour la grille
+        if evolving:
+            grid = update_grid(grid, [2, 3, 3])  # Appeler update_grid avec les règles classiques
+            generation += 1
+            pygame.display.set_caption(f"Game of Life - Generation: {generation}")
+
+        clock.tick(10)
+
+    pygame.quit()
+
+
+def update_grid(grid, rules):
+    """Met à jour la grille selon les règles classiques de Conway."""
+    new_grid = np.zeros_like(grid)
+    padded_grid = np.pad(grid, pad_width=1, mode="constant", constant_values=0)
+
+    for row in range(1, padded_grid.shape[0] - 1):
+        for col in range(1, padded_grid.shape[1] - 1):
+            neighbors = np.sum(padded_grid[row-1:row+2, col-1:col+2]) - padded_grid[row, col]
+
+            if padded_grid[row, col] == 1 and (neighbors < rules[0] or neighbors > rules[1]):
+                new_grid[row-1, col-1] = 0
+            elif padded_grid[row, col] == 0 and neighbors == rules[2]:
+                new_grid[row-1, col-1] = 1
+            else:
+                new_grid[row-1, col-1] = padded_grid[row, col]
+
+    return new_grid
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('mode', choices=['train', 'visualize', 'visualize-start'])
+    parser.add_argument('--cells', type=int, default=50)
+    parser.add_argument('--steps', type=int, default=20)
+    args = parser.parse_args()
+
+    config = GameConfig(
+        initial_cells=args.cells,
+        evolution_steps=args.steps
+    )
+
+    game = GameOfLife(config)
+
+    if args.mode == 'train':
+        game.train()
+    elif args.mode == 'visualize':
+        game.visualize()
+    elif args.mode == 'visualize-start':
+        visualize_initial_grid(config)
+
+
 if __name__ == "__main__":
-    game = GameOfLifeAI(focus='balanced')
-    game.run()
+    main()

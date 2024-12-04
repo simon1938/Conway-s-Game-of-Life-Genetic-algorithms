@@ -1,141 +1,149 @@
 import numpy as np
 import pygad
-import time
 
 class GameOfLifeOptimizer:
-    def __init__(self, initial_grid, focus='balanced'):
+    def __init__(self, grid_size, rules, focus="balanced"):
         """
-        Initialize the Game of Life Genetic Optimizer
-        
+        Initialiser l'optimisateur
         Args:
-            initial_grid (np.array): Initial grid configuration
-            focus (str): Focus of fitness function
+            grid_size (tuple): Dimensions de la grille (rows, cols)
+            rules (list): Règles de Conway
+            focus (str): Critère de fitness ('stability', 'oscillation', 'movement', 'balanced')
         """
-        self.grid = initial_grid
+        self.grid_size = grid_size
+        self.rules = rules
         self.focus = focus
 
-    def update_grid(self, grid, rules):
+    def update_grid(self, grid):
         """Mettre à jour la grille selon les règles"""
-        min_survive, max_survive, birth = rules
         new_grid = np.zeros_like(grid)
-        padded_grid = np.pad(grid, pad_width=1, mode='constant', constant_values=0)
-        
+        padded_grid = np.pad(grid, pad_width=1, mode="constant", constant_values=0)
+
         for row in range(1, padded_grid.shape[0] - 1):
             for col in range(1, padded_grid.shape[1] - 1):
                 neighbors = np.sum(padded_grid[row-1:row+2, col-1:col+2]) - padded_grid[row, col]
-                
-                if padded_grid[row, col] == 1 and (neighbors < min_survive or neighbors > max_survive):
+
+                if padded_grid[row, col] == 1 and (neighbors < self.rules[0] or neighbors > self.rules[1]):
                     new_grid[row-1, col-1] = 0
-                elif padded_grid[row, col] == 0 and neighbors == birth:
+                elif padded_grid[row, col] == 0 and neighbors == self.rules[2]:
                     new_grid[row-1, col-1] = 1
                 else:
                     new_grid[row-1, col-1] = padded_grid[row, col]
         return new_grid
 
-    def calculate_fitness(self, grid, rules, max_generations=20):
+    def calculate_fitness(self, initial_positions, max_generations=20):
         """
-        Calculer la fitness basée sur le focus
-        
+        Calculer le score de fitness basé sur l'évolution
         Args:
-            grid (np.array): Grille initiale
-            rules (list): Règles du jeu
+            initial_positions (list): Liste des positions des cellules vivantes [(x, y), ...]
             max_generations (int): Nombre de générations à simuler
-        
         Returns:
             float: Score de fitness
         """
+        # Vérifier que les positions sont dans les limites de la grille
+        filtered_positions = [
+            (x, y) for x, y in initial_positions 
+            if 0 <= x < self.grid_size[1] and 0 <= y < self.grid_size[0]
+        ]
+
+        grid = np.zeros(self.grid_size, dtype=int)
+        for x, y in filtered_positions:
+            grid[y, x] = 1  # Attention à l'ordre y, x
+
         temp_grid = grid.copy()
         grid_history = [temp_grid.copy()]
-        
+
         for _ in range(max_generations):
-            temp_grid = self.update_grid(temp_grid, rules)
+            temp_grid = self.update_grid(temp_grid)
             grid_history.append(temp_grid.copy())
+
+        # Critères de fitness multiples
+        return self.calculate_pattern_fitness(grid_history)
+
+    def calculate_pattern_fitness(self, grid_history):
+        """
+        Calculer la fitness basée sur différents critères
+        Returns:
+            float: Score de fitness
+        """
+        # Diversité des patterns
+        unique_patterns = len(set(map(lambda g: g.tobytes(), grid_history)))
         
-        # Calculs de fitness selon le focus
+        # Nombre de cellules vivantes
+        live_cell_scores = [np.sum(grid) for grid in grid_history]
+        
+        # Stabilité (variation minimale)
+        stability_scores = [np.sum(np.abs(grid_history[i] - grid_history[i-1])) for i in range(1, len(grid_history))]
+        
+        # Combinaison des scores selon le focus
         if self.focus == 'stability':
-            fitness = max_generations - sum(np.sum(np.abs(grid_history[i] - grid_history[i-1])) for i in range(1, len(grid_history)))
-        
-        elif self.focus == 'oscillation':
-            fitness = self.detect_oscillation(grid_history)
-        
+            return unique_patterns * (1 / (np.mean(stability_scores) + 1))
         elif self.focus == 'movement':
-            fitness = self.calculate_movement(grid_history)
-        
+            return unique_patterns * np.std(live_cell_scores)
+        elif self.focus == 'oscillation':
+            return unique_patterns * len(grid_history)
         else:  # balanced
-            stability = max_generations - sum(np.sum(np.abs(grid_history[i] - grid_history[i-1])) for i in range(1, len(grid_history)))
-            oscillation = self.detect_oscillation(grid_history)
-            movement = self.calculate_movement(grid_history)
-            fitness = (stability + oscillation + movement) / 3
-        
-        return max(0, fitness)
+            return (unique_patterns * 
+                    np.mean(live_cell_scores) * 
+                    (1 / (np.mean(stability_scores) + 1)) * 
+                    np.std(live_cell_scores))
 
-    def detect_oscillation(self, grid_history, period_range=(2, 10)):
+    def optimize_layout(self, num_positions=10, attempts=20):
         """
-        Détecter l'oscillation dans l'historique de la grille
-        
+        Optimiser la disposition des cellules initiales
+        Args:
+            num_positions (int): Nombre de positions à optimiser
+            attempts (int): Nombre de tentatives d'optimisation
         Returns:
-            float: Score d'oscillation
-        """
-        for period in range(period_range[0], period_range[1] + 1):
-            if period < len(grid_history):
-                if np.array_equal(grid_history[0], grid_history[period]):
-                    return len(grid_history) / period
-        return 0
-
-    def calculate_movement(self, grid_history):
-        """
-        Calculer le mouvement du centre de masse
-        
-        Returns:
-            float: Score de mouvement
-        """
-        def center_of_mass(grid):
-            rows, cols = np.where(grid == 1)
-            if len(rows) == 0:
-                return None
-            return np.mean(rows), np.mean(cols)
-        
-        centers = [center_of_mass(grid) for grid in grid_history if center_of_mass(grid) is not None]
-        
-        if len(centers) > 1:
-            total_distance = sum(np.linalg.norm(np.array(centers[i]) - np.array(centers[i-1])) for i in range(1, len(centers)))
-            return total_distance
-        return 0
-
-    def optimize_rules(self):
-        """
-        Optimiser les règles avec un algorithme génétique
-        
-        Returns:
-            list: Meilleures règles trouvées
-        """
+            list: Meilleures positions des cellules
+            """
         def fitness_func(ga_instance, solution, solution_idx):
-            return self.calculate_fitness(self.grid, solution)
+            # Convertir la solution en paires de coordonnées
+            positions = [
+                (int(solution[i]), int(solution[i+1])) 
+                for i in range(0, len(solution), 2)
+            ]
+            return self.calculate_fitness(positions)
 
-        ga_instance = pygad.GA(
+        best_positions = None
+        best_fitness = float('-inf')
+
+        for _ in range(attempts):
+            ga_instance = pygad.GA(
             num_generations=20,
             num_parents_mating=5,
             fitness_func=fitness_func,
             sol_per_pop=10,
-            num_genes=3,
-            gene_space=[(1, 3), (3, 5), (2, 4)],
-            mutation_num_genes=1,
-            on_generation=lambda ga: print(f"Generation {ga.generations_completed} completed."),
-            init_range_low=1,
-            init_range_high=5
+            num_genes=num_positions * 2,
+            gene_space=[
+                {"low": 0, "high": self.grid_size[1] - 1} if i % 2 == 0 
+                else {"low": 0, "high": self.grid_size[0] - 1} 
+                for i in range(num_positions * 2)
+            ],
+            mutation_num_genes=2,
+            mutation_type="random",
+            on_generation=lambda ga: print(f"Génération {ga.generations_completed}")  # Remplace delay_after_gen
         )
 
-        ga_instance.run()
-        solution, fitness, _ = ga_instance.best_solution()
-        print(f"Best solution: {solution}, Fitness: {fitness}")
-        return [int(solution[0]), int(solution[1]), int(solution[2])]
 
+            ga_instance.run()
+            solution, fitness, _ = ga_instance.best_solution()
+
+            # Mettre à jour les meilleures positions si nécessaire
+            if fitness > best_fitness:
+                best_fitness = fitness
+                best_positions = [
+                    (int(solution[i]), int(solution[i+1])) 
+                    for i in range(0, len(solution), 2)
+                ]
+
+        print(f"🎯 Meilleures positions trouvées - Fitness: {best_fitness}")
+        return best_positions or []
 def main():
-    # Exemple d'utilisation
-    initial_grid = np.random.choice([0, 1], size=(50, 50), p=[0.85, 0.15])
-    optimizer = GameOfLifeOptimizer(initial_grid, focus='balanced')
-    best_rules = optimizer.optimize_rules()
-    print("Best rules found:", best_rules)
+    # Test de l'optimisateur
+    optimizer = GameOfLifeOptimizer((50, 50), [2, 3, 3], focus='balanced')
+    best_positions = optimizer.optimize_layout()
+    print("Positions optimisées:", best_positions)
 
 if __name__ == "__main__":
     main()
