@@ -10,7 +10,7 @@ class GameConfig:
     width: int = 800
     height: int = 600
     cell_size: int = 10
-    initial_cells: int = 50
+    initial_cells: int = 500
     evolution_steps: int = 20
     training_attempts: int = 20
 
@@ -177,7 +177,7 @@ def visualize_initial_grid(config: GameConfig):
         grid[y, x] = 1
 
     running = True
-    evolving = False
+    evolving = False  # Assurez-vous que l'évolution est désactivée par défaut
     generation = 0
 
     while running:
@@ -204,7 +204,7 @@ def visualize_initial_grid(config: GameConfig):
         pygame.display.flip()
 
         # Si le mode évolution est activé, mettre à jour la grille
-        if evolving:
+        if evolving:  # Cette condition empêche la mise à jour tant que E n'est pas pressé
             grid = update_grid(grid, [2, 3, 3])  # Appeler update_grid avec les règles classiques
             generation += 1
             pygame.display.set_caption(f"Game of Life - Generation: {generation}")
@@ -212,6 +212,7 @@ def visualize_initial_grid(config: GameConfig):
         clock.tick(10)
 
     pygame.quit()
+
 
 
 def update_grid(grid, rules):
@@ -236,8 +237,8 @@ def update_grid(grid, rules):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['train', 'visualize', 'visualize-start'])
-    parser.add_argument('--cells', type=int, default=50)
-    parser.add_argument('--steps', type=int, default=20)
+    parser.add_argument('--cells', type=int, default=100)
+    parser.add_argument('--steps', type=int, default=10)
     args = parser.parse_args()
 
     config = GameConfig(
