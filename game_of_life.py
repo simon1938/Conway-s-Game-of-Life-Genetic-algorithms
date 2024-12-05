@@ -111,9 +111,9 @@ class GameOfLife:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['train', 'visualize', 'visualize-start'])
-    parser.add_argument('--cells', type=int, default=100, help="Number of initial cells")
-    parser.add_argument('--training_attempts', type=int, default=20, help="Number of training attempts")
-    parser.add_argument('--steps', type=int, default=10, help="Number of evolution steps") 
+    parser.add_argument('--cells', type=int, default=200, help="Number of initial cells")
+    parser.add_argument('--training_attempts', type=int, default=10, help="Number of training attempts")
+    parser.add_argument('--steps', type=int, default=20, help="Number of evolution steps") 
 
     args = parser.parse_args()
 
