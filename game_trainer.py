@@ -1,11 +1,15 @@
 import numpy as np
-import pygad
 import json
+import random
 
 class GameTrainer:
     def __init__(self, game):
         self.game = game
-        
+        self.population_size = 10
+        self.num_generations = self.game.config.training_attempts
+        self.mutation_rate = 0.1
+        self.elite_size = 2
+
     def calculate_pattern_fitness(self, grid_history):
         """Calculate fitness based on pattern variety, live cells, and stability"""
         # Convert grids to bytes for comparison
@@ -58,54 +62,112 @@ class GameTrainer:
             
         return self.calculate_pattern_fitness(grid_history)
 
-    def train(self):
-        """Train using genetic algorithm to find optimal starting positions"""
-        def on_generation(ga):
-            best_solution = ga.best_solution()[0]
-            positions = [(int(best_solution[i]), int(best_solution[i+1])) 
-                        for i in range(0, len(best_solution), 2)]
-            fitness = self.calculate_fitness(positions)
-            print(f"Generation {ga.generations_completed}: Best Fitness = {fitness:.2f}")
-
-        def fitness_func(ga_instance, solution, solution_idx):
-            positions = [(int(solution[i]), int(solution[i+1])) 
-                        for i in range(0, len(solution), 2)]
-            fitness = self.calculate_fitness(positions)
-            return fitness
-
+    def generate_initial_population(self):
+        """Generate initial population of random solutions"""
         num_genes = self.game.config.initial_cells * 2
-        ga_instance = pygad.GA(
-            num_generations=self.game.config.training_attempts,  # Utilise la valeur transmise
-            num_parents_mating=5,
-            fitness_func=fitness_func,
-            sol_per_pop=10,
-            num_genes=num_genes,
-            gene_space=[
-                {"low": 0, "high": self.game.grid_width - 1} if i % 2 == 0 
-                else {"low": 0, "high": self.game.grid_height - 1} 
+        population = []
+        for _ in range(self.population_size):
+            solution = [
+                random.randint(0, self.game.grid_width - 1) if i % 2 == 0 
+                else random.randint(0, self.game.grid_height - 1)
                 for i in range(num_genes)
-            ],
-            mutation_num_genes=2,
-            mutation_type="random",
-            on_generation=on_generation
-        )
+            ]
+            population.append(solution)
+        return population
 
+    def select_parents(self, population, fitness_scores):
+        """Tournament selection method"""
+        parents = []
+        for _ in range(len(population)):
+            # Select two random individuals
+            tournament = random.sample(list(range(len(population))), 3)
+            tournament_fitness = [fitness_scores[i] for i in tournament]
+            winner = tournament[tournament_fitness.index(max(tournament_fitness))]
+            parents.append(population[winner])
+        return parents
+
+    def crossover(self, parent1, parent2):
+        """Single point crossover"""
+        crossover_point = random.randint(1, len(parent1) - 1)
+        child1 = parent1[:crossover_point] + parent2[crossover_point:]
+        child2 = parent2[:crossover_point] + parent1[crossover_point:]
+        return child1, child2
+
+    def mutate(self, solution):
+        """Mutation with random gene replacement"""
+        for i in range(len(solution)):
+            if random.random() < self.mutation_rate:
+                if i % 2 == 0:
+                    solution[i] = random.randint(0, self.game.grid_width - 1)
+                else:
+                    solution[i] = random.randint(0, self.game.grid_height - 1)
+        return solution
+
+    def train(self):
+        """Train using custom genetic algorithm to find optimal starting positions"""
         print("Starting training...")
         print(f"Initial cells: {self.game.config.initial_cells}")
         print(f"Evolution steps: {self.game.config.evolution_steps}")
 
-        ga_instance.run()
-        solution, fitness, _ = ga_instance.best_solution()
-        
-        if solution is None:
+        # Generate initial population
+        population = self.generate_initial_population()
+
+        best_overall_fitness = 0
+        best_overall_solution = None
+
+        # Evolution loop
+        for generation in range(self.num_generations):
+            # Calculate fitness for current population
+            fitness_scores = [self.calculate_fitness(
+                [(int(solution[i]), int(solution[i+1])) 
+                 for i in range(0, len(solution), 2)]
+            ) for solution in population]
+
+            # Track best solution in this generation
+            current_best_index = fitness_scores.index(max(fitness_scores))
+            current_best_fitness = fitness_scores[current_best_index]
+            current_best_solution = population[current_best_index]
+
+            # Update overall best
+            if current_best_fitness > best_overall_fitness:
+                best_overall_fitness = current_best_fitness
+                best_overall_solution = current_best_solution
+
+            print(f"Generation {generation}: Best Fitness = {current_best_fitness:.2f}")
+
+            # Selection
+            parents = self.select_parents(population, fitness_scores)
+
+            # Next generation
+            next_population = []
+
+            # Elitism: keep best solutions
+            sorted_indices = sorted(range(len(fitness_scores)), 
+                                    key=lambda k: fitness_scores[k], 
+                                    reverse=True)
+            elite = [population[i] for i in sorted_indices[:self.elite_size]]
+            next_population.extend(elite)
+
+            # Crossover and mutation
+            while len(next_population) < self.population_size:
+                parent1, parent2 = random.sample(parents, 2)
+                child1, child2 = self.crossover(parent1, parent2)
+                next_population.append(self.mutate(child1))
+                if len(next_population) < self.population_size:
+                    next_population.append(self.mutate(child2))
+
+            population = next_population
+
+        # Final solution
+        if best_overall_solution is None:
             print("Training failed to find a solution")
             return
-            
-        best_positions = [(int(solution[i]), int(solution[i+1])) 
-                         for i in range(0, len(solution), 2)]
+
+        best_positions = [(int(best_overall_solution[i]), int(best_overall_solution[i+1])) 
+                          for i in range(0, len(best_overall_solution), 2)]
         
         print(f"\nTraining completed!")
-        print(f"Best fitness found: {fitness:.2f}")
+        print(f"Best fitness found: {best_overall_fitness:.2f}")
         print(f"Saving {len(best_positions)} positions to best_positions.json")
         
         with open('best_positions.json', 'w') as f:
