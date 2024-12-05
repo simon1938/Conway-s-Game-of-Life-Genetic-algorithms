@@ -1,4 +1,4 @@
 # Conway-s-Game-of-Life-Genetic-algorithms
-python main.py train --cells 50 --steps 20
-python main.py visualize
-python main.py visualize-start
+python game_of_life.py train --cells 50 --training_attempts 10 --steps 60
+python game_of_life.py visualize
+python game_of_life.py visualize-start
