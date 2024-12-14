@@ -3,13 +3,45 @@ import json
 import random
 
 class GameTrainer:
-    def __init__(self, game):
+    def __init__(self, game, grid_file=None,args=None):
         self.game = game
+        self.grid_file = grid_file
         self.population_size = 10
         self.num_generations = self.game.config.training_attempts
         self.mutation_rate = 0.1
         self.elite_size = 2
+        self.args = args
 
+    def generate_initial_population(self):
+        """Generate initial population of random solutions or from a grid file"""
+        num_genes = self.game.config.initial_cells * 2
+        print("Generating initial population...")
+        if self.grid_file:
+            try:
+                with open(self.grid_file, 'r') as f:
+                    positions = json.load(f)
+                print(f"Loaded {len(positions)} positions from {self.grid_file}")
+                # Convert the positions into a single flattened solution
+                population = [
+                    [x if i % 2 == 0 else y for i, (x, y) in enumerate(positions)]
+                    for _ in range(self.population_size)
+                ]
+                return population
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                print(f"Error loading grid file: {e}. Falling back to random initialization.")
+
+        # Default to random population if no file is provided or loading fails
+        print("No valid grid file found. Generating random initial population.")
+        population = []
+        for _ in range(self.population_size):
+            solution = [
+                random.randint(0, self.game.grid_width - 1) if i % 2 == 0 
+                else random.randint(0, self.game.grid_height - 1)
+                for i in range(num_genes)
+            ]
+            population.append(solution)
+        return population
+    
     def calculate_pattern_fitness(self, grid_history):
         """Calculate fitness based on pattern variety, live cells, and stability"""
         # Convert grids to bytes for comparison
@@ -62,18 +94,6 @@ class GameTrainer:
             
         return self.calculate_pattern_fitness(grid_history)
 
-    def generate_initial_population(self):
-        """Generate initial population of random solutions"""
-        num_genes = self.game.config.initial_cells * 2
-        population = []
-        for _ in range(self.population_size):
-            solution = [
-                random.randint(0, self.game.grid_width - 1) if i % 2 == 0 
-                else random.randint(0, self.game.grid_height - 1)
-                for i in range(num_genes)
-            ]
-            population.append(solution)
-        return population
 
     def select_parents(self, population, fitness_scores):
         """Tournament selection method"""
@@ -168,7 +188,6 @@ class GameTrainer:
         
         print(f"\nTraining completed!")
         print(f"Best fitness found: {best_overall_fitness:.2f}")
+       
+        print(f"Args: cells={self.args.cells}, training_attempts={self.args.training_attempts}, steps={self.args.steps}, grid_file={self.args.grid_file}")
         print(f"Saving {len(best_positions)} positions to best_positions.json")
-        
-        with open('best_positions.json', 'w') as f:
-            json.dump(best_positions, f)

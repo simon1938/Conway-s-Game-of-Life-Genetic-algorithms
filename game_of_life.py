@@ -22,6 +22,7 @@ class GameOfLife:
         self.grid = np.zeros((self.grid_height, self.grid_width), dtype=int)
         self.rules = [2, 3, 3]  # Survie, surpopulation, naissance
 
+    
     def update_grid(self):
         """Update the grid according to Conway's Game of Life rules"""
         new_grid = np.zeros_like(self.grid)
@@ -42,7 +43,7 @@ class GameOfLife:
                     new_grid[row-1, col-1] = 1 if neighbors == self.rules[2] else 0
                     
         return new_grid
-
+    
     def set_initial_state(self, positions):
         """Initialize the grid with given positions"""
         self.grid = np.zeros((self.grid_height, self.grid_width), dtype=int)
@@ -112,13 +113,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['train', 'visualize', 'visualize-start'])
     parser.add_argument('--cells', type=int, default=200, help="Number of initial cells")
-    parser.add_argument('--training_attempts', type=int, default=10, help="Number of training attempts")
-    parser.add_argument('--steps', type=int, default=20, help="Number of evolution steps") 
+    parser.add_argument('--training_attempts', type=int, default=30, help="Number of training attempts")
+    parser.add_argument('--steps', type=int, default=30, help="Number of evolution steps")
+    parser.add_argument('--grid_file', type=str, default=None, help="JSON file for initial grid positions")
 
     args = parser.parse_args()
 
-    config = GameConfig(    
-        initial_cells=args.cells,        
+    config = GameConfig(
+        initial_cells=args.cells,
         training_attempts=args.training_attempts,
         evolution_steps=args.steps
     )
@@ -130,8 +132,7 @@ def main():
     elif args.mode == 'visualize-start':
         game.visualize(start_paused=True)
     elif args.mode == 'train':
-        trainer = GameTrainer(game)
+        trainer = GameTrainer(game, grid_file=args.grid_file,args=args)
         trainer.train()
-
 if __name__ == "__main__":
     main()
