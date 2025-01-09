@@ -1,6 +1,7 @@
 import numpy as np
 import json
 import random
+import datetime  
 
 class GameTrainer:
     def __init__(self, game, grid_file=None,args=None):
@@ -11,6 +12,22 @@ class GameTrainer:
         self.mutation_rate = 0.1
         self.elite_size = 2
         self.args = args
+        self.training_history = {
+            'fitness_history': [],
+            'best_fitness_per_gen': [],
+            'avg_fitness_per_gen': [],
+            'params': {
+                'population_size': self.population_size,
+                'num_generations': self.num_generations,
+                'mutation_rate': self.mutation_rate,
+                'elite_size': self.elite_size,
+                'initial_cells': self.game.config.initial_cells,
+                'evolution_steps': self.game.config.evolution_steps,
+                'grid_width': self.game.grid_width,
+                'grid_height': self.game.grid_height,
+                'grid_file': self.grid_file
+            }
+        }
 
     def generate_initial_population(self):
         """Generate initial population of random solutions or from a grid file"""
@@ -94,7 +111,6 @@ class GameTrainer:
             
         return self.calculate_pattern_fitness(grid_history)
 
-
     def select_parents(self, population, fitness_scores):
         """Tournament selection method"""
         parents = []
@@ -123,6 +139,26 @@ class GameTrainer:
                     solution[i] = random.randint(0, self.game.grid_height - 1)
         return solution
 
+    def save_training_history(self):
+        """Save training history and parameters to a file"""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f'training_history_{timestamp}.json'
+        
+        with open(filename, 'w') as f:
+            json.dump(self.training_history, f, indent=4)
+        print(f"Training history saved to {filename}")
+        
+        # Save config separately
+        config_filename = 'config_train.json'
+        config_data = {
+            'timestamp': timestamp,
+            'args': vars(self.args),
+            'training_params': self.training_history['params']
+        }
+        with open(config_filename, 'w') as f:
+            json.dump(config_data, f, indent=4)
+        print(f"Training config saved to {config_filename}")
+
     def train(self):
         """Train using custom genetic algorithm to find optimal starting positions"""
         print("Starting training...")
@@ -147,6 +183,11 @@ class GameTrainer:
             current_best_index = fitness_scores.index(max(fitness_scores))
             current_best_fitness = fitness_scores[current_best_index]
             current_best_solution = population[current_best_index]
+
+            # Save generation statistics
+            self.training_history['best_fitness_per_gen'].append(current_best_fitness)
+            self.training_history['avg_fitness_per_gen'].append(np.mean(fitness_scores))
+            self.training_history['fitness_history'].append(list(fitness_scores))
 
             # Update overall best
             if current_best_fitness > best_overall_fitness:
@@ -191,3 +232,10 @@ class GameTrainer:
        
         print(f"Args: cells={self.args.cells}, training_attempts={self.args.training_attempts}, steps={self.args.steps}, grid_file={self.args.grid_file}")
         print(f"Saving {len(best_positions)} positions to best_positions.json")
+        
+        # Save the training history
+        self.save_training_history()
+        
+        # Save the best positions
+        with open('best_positions.json', 'w') as f:
+            json.dump(best_positions, f)
