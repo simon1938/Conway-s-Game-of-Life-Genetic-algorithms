@@ -33,17 +33,36 @@ class GameTrainer:
         """Generate initial population of random solutions or from a grid file"""
         num_genes = self.game.config.initial_cells * 2
         print("Generating initial population...")
+        
         if self.grid_file:
             try:
                 with open(self.grid_file, 'r') as f:
                     positions = json.load(f)
                 print(f"Loaded {len(positions)} positions from {self.grid_file}")
-                # Convert the positions into a single flattened solution
-                population = [
-                    [x if i % 2 == 0 else y for i, (x, y) in enumerate(positions)]
-                    for _ in range(self.population_size)
-                ]
+                
+                # Convert the best solution into our genetic format
+                best_solution = [coord for pos in positions for coord in pos]
+                
+                # Create population with the best solution and variations
+                population = [best_solution.copy()]  # Keep one exact copy
+                
+                # Create variations for the rest of the population
+                for _ in range(self.population_size - 1):
+                    variant = best_solution.copy()
+                    # Apply light mutations to create variants
+                    num_mutations = random.randint(1, max(2, int(len(variant) * 0.1)))
+                    for _ in range(num_mutations):
+                        idx = random.randint(0, len(variant) - 1)
+                        if idx % 2 == 0:  # x coordinate
+                            variant[idx] = random.randint(max(0, variant[idx] - 5), 
+                                                        min(self.game.grid_width - 1, variant[idx] + 5))
+                        else:  # y coordinate
+                            variant[idx] = random.randint(max(0, variant[idx] - 5), 
+                                                        min(self.game.grid_height - 1, variant[idx] + 5))
+                    population.append(variant)
+                
                 return population
+                
             except (FileNotFoundError, json.JSONDecodeError) as e:
                 print(f"Error loading grid file: {e}. Falling back to random initialization.")
 
@@ -58,6 +77,7 @@ class GameTrainer:
             ]
             population.append(solution)
         return population
+    
     
     def calculate_pattern_fitness(self, grid_history):
         """Calculate fitness based on pattern variety, live cells, and stability"""

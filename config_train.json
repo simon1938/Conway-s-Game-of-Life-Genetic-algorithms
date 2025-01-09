@@ -1,15 +1,15 @@
 {
-    "timestamp": "20250109_134855",
+    "timestamp": "20250109_171202",
     "args": {
         "mode": "train",
         "cells": 200,
-        "training_attempts": 100,
+        "training_attempts": 5,
         "steps": 35,
         "grid_file": null
     },
     "training_params": {
         "population_size": 10,
-        "num_generations": 100,
+        "num_generations": 5,
         "mutation_rate": 0.1,
         "elite_size": 2,
         "initial_cells": 200,
