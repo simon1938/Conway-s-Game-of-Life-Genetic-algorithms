@@ -10,6 +10,7 @@ class GameTrainer:
         self.population_size = 10
         self.num_generations = self.game.config.training_attempts
         self.mutation_rate = 0.1
+        self.fitness_fonction='large_structure' #pattern 
         self.elite_size = 2
         self.args = args
         self.training_history = {
@@ -117,6 +118,50 @@ class GameTrainer:
                   (std_live_cells + 1))
                   
         return max(0.0, fitness)
+    def calculate_large_structure_fitness(self, grid_history):
+        """Calculate fitness to favor large, stable structures"""
+        # Calculate live cells for each generation
+        live_cell_scores = [np.sum(grid) for grid in grid_history]
+        
+        # Skip empty grids
+        if not live_cell_scores or max(live_cell_scores) == 0:
+            return 0.0
+            
+        # Calculate stability between generations
+        stability_scores = []       
+        for i in range(1, len(grid_history)):
+            diff = np.sum(np.abs(grid_history[i] - grid_history[i-1]))
+            stability_scores.append(diff)
+            
+        if not stability_scores:
+            return 0.0
+            
+        # Calculate final fitness
+        mean_live_cells = np.mean(live_cell_scores)
+        mean_stability = np.mean(stability_scores)
+        std_live_cells = np.std(live_cell_scores)
+        
+        # Penalize multiple stable structures
+        stable_structures = 0
+        for i in range(1, len(grid_history)):
+            if np.array_equal(grid_history[i], grid_history[i-1]):
+                stable_structures += 1
+        
+        # Avoid division by zero
+        if mean_stability == 0:
+            stability_factor = 1.0
+        else:
+            stability_factor = 1.0 / (mean_stability + 1.0)
+            
+        # Penalize multiple stable structures
+        structure_penalty = 1.0 / (stable_structures + 1.0)
+            
+        fitness = (mean_live_cells * 
+                  stability_factor * 
+                  (std_live_cells + 1) *
+                  structure_penalty)
+                  
+        return max(0.0, fitness)
 
     def calculate_fitness(self, positions):
         """Calculate fitness for a given set of initial positions"""
@@ -129,7 +174,13 @@ class GameTrainer:
             grid_history.append(current_grid.copy())
             self.game.grid = current_grid.copy()
             
-        return self.calculate_pattern_fitness(grid_history)
+        # Choose which fitness function to use
+        if self.fitness_fonction == 'pattern':
+            return self.calculate_pattern_fitness(grid_history)
+        elif self.fitness_fonction == 'large_structure':
+            return self.calculate_large_structure_fitness(grid_history)
+        else:
+            return self.calculate_pattern_fitness(grid_history)
 
     def select_parents(self, population, fitness_scores):
         """Tournament selection method"""
